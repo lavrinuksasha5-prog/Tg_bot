@@ -4,6 +4,7 @@ import re
 from pathlib import Path
 from aiogram import Bot, Dispatcher, F
 from aiogram.types import Message, FSInputFile
+from aiogram.filters import Command
 
 # Railway берет токен из настроек (Variables)
 TOKEN = os.getenv("BOT_TOKEN")
@@ -28,13 +29,17 @@ def clean_name(name: str) -> str:
     stem = re.sub(r"[^\w\s\-]", "_", stem, flags=re.UNICODE)
     return stem.strip()
 
+@dp.message(Command("start"))
+async def cmd_start(message: Message):
+    # Короткий ответ на старт, чтобы бот не казался мертвым
+    await message.answer("Бот работает. Скидывай .txt файлы.")
+
 @dp.message(F.document)
 async def handle_document(message: Message):
     doc = message.document
 
     if not doc.file_name.lower().endswith(".txt"):
-        await message.reply("Пришли, пожалуйста, файл .txt")
-        return
+        return # Если не txt - просто игнорируем (ничего не пишем)
 
     # Скачиваем файл
     src_path = TEMP_DIR / f"{message.from_user.id}_{doc.file_id}.txt"
@@ -49,18 +54,23 @@ async def handle_document(message: Message):
         # Переименовываем
         src_path.rename(new_path)
 
-        # Отправляем обратно
+        # Пауза, чтобы Telegram не забанил за флуд
+        await asyncio.sleep(2)
+
+        # Отправляем обратно БЕЗ подписи (caption)
         await message.reply_document(
-            FSInputFile(new_path, filename=new_name),
-            caption=f"Готово: {count} строк\nИмя: <code>{new_name}</code>",
+            FSInputFile(new_path, filename=new_name)
         )
     except Exception as e:
-        await message.reply(f"Ошибка при обработке: {e}")
+        # Если произошла ошибка, пишем только в консоль Railway, в телегу не шлем
+        print(f"Ошибка при обработке: {e}")
     finally:
         if src_path.exists():
             src_path.unlink(missing_ok=True)
 
 async def main():
+    # Удаляем старые вебхуки (на случай если бот завис)
+    await bot.delete_webhook(drop_pending_updates=True)
     await dp.start_polling(bot)
 
 if __name__ == "__main__":
